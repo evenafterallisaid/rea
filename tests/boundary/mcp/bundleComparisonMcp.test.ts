@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
@@ -161,15 +162,27 @@ it("requires absolute bundle paths without changing server-cwd semantics", async
     ] as const;
     for (const [leftPath, rightPath, rejectedField] of relativeCases) {
       const result = await compare(leftPath, rightPath);
-      expect(parseMcpToolError(result).error).toMatchObject({
+      const { error } = parseMcpToolError(result);
+      expect(error).toMatchObject({
         code: "invalid_request",
         category: "invalid_input",
       });
-      expect(result.content[0]).toMatchObject({
-        text: expect.stringContaining(
-          `${rejectedField}: must be an absolute local filesystem path`,
-        ),
-      });
+      const issues = z
+        .array(
+          z.object({
+            path: z.array(z.union([z.string(), z.number()])),
+            reason: z.enum(["invalid_format", "invalid_value"]),
+            message: z.string(),
+          }),
+        )
+        .parse(error.details?.issues);
+      // sdk diagnostics may retain a root message; direct schema validation supplies field paths.
+      const messages = issues.map(({ path, message }) =>
+        path.length === 0 ? message : `${path.join(".")}: ${message}`,
+      );
+      expect(messages.join(", ")).toContain(
+        `${rejectedField}: must be an absolute local filesystem path`,
+      );
     }
     expect(
       bundleComparisonInputSchema.parse({
