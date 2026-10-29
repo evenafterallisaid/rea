@@ -5,7 +5,6 @@ import { join } from "node:path";
 
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
@@ -162,27 +161,20 @@ it("requires absolute bundle paths without changing server-cwd semantics", async
     ] as const;
     for (const [leftPath, rightPath, rejectedField] of relativeCases) {
       const result = await compare(leftPath, rightPath);
-      const { error } = parseMcpToolError(result);
-      expect(error).toMatchObject({
+      expect(parseMcpToolError(result).error).toMatchObject({
         code: "invalid_request",
         category: "invalid_input",
+        details: {
+          operation: "compare_bundles",
+          issues: expect.arrayContaining([
+            expect.objectContaining({
+              path: [rejectedField],
+              reason: "invalid_format",
+              expected: "regex",
+            }),
+          ]),
+        },
       });
-      const issues = z
-        .array(
-          z.object({
-            path: z.array(z.union([z.string(), z.number()])),
-            reason: z.enum(["invalid_format", "invalid_value"]),
-            message: z.string(),
-          }),
-        )
-        .parse(error.details?.issues);
-      // sdk diagnostics may retain a root message; direct schema validation supplies field paths.
-      const messages = issues.map(({ path, message }) =>
-        path.length === 0 ? message : `${path.join(".")}: ${message}`,
-      );
-      expect(messages.join(", ")).toContain(
-        `${rejectedField}: must be an absolute local filesystem path`,
-      );
     }
     expect(
       bundleComparisonInputSchema.parse({
@@ -208,9 +200,15 @@ it("requires absolute bundle paths without changing server-cwd semantics", async
     expect(parseMcpToolError(relativeImport).error).toMatchObject({
       code: "invalid_request",
       category: "invalid_input",
-    });
-    expect(relativeImport.content[0]).toMatchObject({
-      text: expect.stringContaining("absolute local filesystem path"),
+      details: {
+        operation: "import_evidence_bundle",
+        issues: expect.arrayContaining([
+          expect.objectContaining({
+            path: ["path"],
+            reason: "invalid_format",
+          }),
+        ]),
+      },
     });
     const absolute = await compare(
       join(root, "left.json"),

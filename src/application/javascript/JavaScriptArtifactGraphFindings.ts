@@ -35,6 +35,7 @@ import {
 import {
   moduleResolutionModeForJavaScriptReference,
   isJsonModuleTarget,
+  isNativeAddonModuleTarget,
 } from "../../domain/javascript/javascriptModuleResolutionMode.js";
 
 type StaticReference = JavaScriptStaticAnalysis["references"][number];
@@ -365,7 +366,8 @@ const addReference = (
     coverage: input.coverage,
     relation:
       input.value.operation === "load" &&
-      resolved?.file?.kind === "native-addon"
+      resolved?.path != null &&
+      isNativeAddonModuleTarget(resolved.path, resolved.file?.kind)
         ? "loads"
         : "imports",
     properties: {
