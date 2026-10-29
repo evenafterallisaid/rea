@@ -80,11 +80,28 @@ cliTest(
     transport.stderr?.on("data", () => undefined);
     try {
       await client.connect(transport);
+      // retain each graph in this session instead of resending full evidence as tool input.
+      for (const [side, expected] of [
+        ["left", left],
+        ["right", right],
+      ] as const) {
+        const analyzed = await client.callTool({
+          name: "analyze_javascript_application",
+          arguments: { input_path: join(root, side) },
+        });
+        expect(analyzed.isError, JSON.stringify(analyzed)).not.toBe(true);
+        expect(parseEvidence(analyzed.structuredContent).evidence_id).toBe(
+          expected.evidence_id,
+        );
+      }
       const response = await client.callTool({
         name: "compare_application_versions",
-        arguments: { left, right },
+        arguments: {
+          left: { kind: "retained-evidence", evidence_id: left.evidence_id },
+          right: { kind: "retained-evidence", evidence_id: right.evidence_id },
+        },
       });
-      expect(response.isError).not.toBe(true);
+      expect(response.isError, JSON.stringify(response)).not.toBe(true);
       const mcpEvidence = parseEvidence(response.structuredContent);
       const mcpComparison = applicationVersionComparisonResultSchema.parse(
         mcpEvidence.normalized_result,
