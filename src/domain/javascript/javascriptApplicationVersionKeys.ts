@@ -56,6 +56,10 @@ const matchTiers = (): readonly MatchTier[] => [
     key: moduleSourceDigestKey,
   },
   {
+    match: { basis: "exact-module-source-digest", confidence: "exact" },
+    key: bundledSourceOccurrenceKey,
+  },
+  {
     match: { basis: "exact-node-identity", confidence: "exact" },
     key: nodeIdentityKey,
   },
@@ -241,6 +245,53 @@ const moduleSourceDigestKey = (node: ApplicationNode): string | null => {
   }
   const value = uniqueStringProperty(node, "source_sha256");
   return value === null ? null : `module-source\0${node.kind}\0${value}`;
+};
+
+/** unchanged bundle bytes and parsed member coordinates survive container changes. */
+const bundledSourceOccurrenceKey = (node: ApplicationNode): string | null => {
+  if (
+    (node.kind !== "javascript-module" && node.kind !== "javascript-chunk") ||
+    node.identity.strategy !== "artifact-local-key"
+  )
+    return null;
+  const path = uniqueStringProperty(node, "path");
+  const runtime = uniqueStringProperty(node, "runtime");
+  if (path === null || runtime === null) return null;
+  let member: string;
+  if (
+    node.kind === "javascript-module" &&
+    node.identity.namespace === `${runtime}:module`
+  ) {
+    const key = uniqueStringProperty(node, "module_key");
+    const source = uniqueStringProperty(node, "source_sha256");
+    if (key === null || source === null) return null;
+    member = compositeKey([key, source]);
+  } else if (
+    node.kind === "javascript-chunk" &&
+    node.identity.namespace === "bundler-chunk"
+  ) {
+    const keys = new Set<string>();
+    for (const { properties } of node.observations) {
+      const value = properties.chunk_keys;
+      if (
+        !Array.isArray(value) ||
+        !value.every((key) => typeof key === "string") ||
+        properties.unknown_chunk_keys !== 0
+      )
+        return null;
+      keys.add(canonicalJson(value));
+    }
+    if (keys.size !== 1) return null;
+    member = [...keys][0]!;
+  } else return null;
+  return compositeKey([
+    node.kind,
+    node.identity.namespace,
+    node.identity.artifact_sha256,
+    path,
+    runtime,
+    member,
+  ]);
 };
 
 const sourceMapKey = (node: ApplicationNode): string | null => {
