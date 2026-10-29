@@ -157,6 +157,47 @@ const mapDependenciesWithEffects = (
 const initializeCache = "const initialize = __vite__mapDeps; initialize([]); ";
 
 const allScenarios: readonly ViteScenario[] = [
+  ...[
+    "Array.name",
+    "Object.name",
+    "Array.length",
+    "Object.length",
+    "Array.prototype.length",
+    "Array.prototype.constructor.name",
+  ].map((value): ViteScenario => ({
+    file: `intrinsic-primitive-${value.replaceAll(".", "-")}.js`,
+    source: mapDependenciesWithEffects(
+      `console.log(${value}); ${defaultCall};`,
+    ),
+    resolved: ["first.js"],
+    unknown: false,
+  })),
+  {
+    file: "changed-intrinsic-name-escape.js",
+    source: mapDependenciesWithEffects(
+      `Object.defineProperty(Array, "name", {value: Array.prototype}); console.log(Array.name); ${defaultCall};`,
+    ),
+    resolved: [],
+    unknown: true,
+  },
+  ...[
+    ["label", "__vite__mapDeps.f.label = 1;", true],
+    [
+      "unselected-prototype",
+      "__vite__mapDeps.f.label = Array.prototype;",
+      true,
+    ],
+    ["selected-prototype", "__vite__mapDeps.f[0] = Array.prototype;", false],
+    ["unknown-property", "__vite__mapDeps.f[key] = Array.prototype;", false],
+  ].map(([name, write, kept]): ViteScenario => ({
+    file: `mapped-cache-${name}-escape.js`,
+    source: mapDependenciesWithEffects(
+      `${initializeCache}${write} opaque(${defaultCall}); ${defaultCall};`,
+    ),
+    callOccurrences: [0, 1],
+    resolved: kept ? ["first.js", "first.js"] : [],
+    unknown: !kept,
+  })),
   {
     file: "independent-inherited-prototype-copy.js",
     source: mapDependenciesWithEffects(

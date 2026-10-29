@@ -37,6 +37,12 @@ export interface ViteCacheIdentity {
   readonly childrenInheritedArrayPrototype?: true;
   /** Intrinsic value that becomes exposed if selected by the helper. */
   readonly intrinsicPrototype?: true;
+  /** exact built-in identity, retained separately from reachable prototypes. */
+  readonly intrinsicObject?:
+    | "Array"
+    | "Object"
+    | "Array.prototype"
+    | "Object.prototype";
   readonly childrenIntrinsicPrototype?: true;
   /** This value is proven to be the shared intrinsic itself. */
   readonly exactPrototype?: true;

@@ -119,6 +119,10 @@ const joinIdentity = (
     left.exactPrototype === true && right.exactPrototype === true
       ? true
       : undefined;
+  const intrinsicObject =
+    left.intrinsicObject === right.intrinsicObject
+      ? left.intrinsicObject
+      : undefined;
   return allocation === left.allocation &&
     owner === left.owner &&
     children === left.children &&
@@ -126,7 +130,8 @@ const joinIdentity = (
     intrinsicPrototype === left.intrinsicPrototype &&
     childrenInheritedArrayPrototype === left.childrenInheritedArrayPrototype &&
     childrenIntrinsicPrototype === left.childrenIntrinsicPrototype &&
-    exactPrototype === left.exactPrototype
+    exactPrototype === left.exactPrototype &&
+    intrinsicObject === left.intrinsicObject
     ? left
     : {
         allocation,
@@ -143,6 +148,7 @@ const joinIdentity = (
           ? { childrenIntrinsicPrototype }
           : {}),
         ...(exactPrototype === true ? { exactPrototype } : {}),
+        ...(intrinsicObject === undefined ? {} : { intrinsicObject }),
       };
 };
 
@@ -765,20 +771,27 @@ export class ViteCacheIdentities {
       const allocation = source.allocation;
       const owns =
         allocation !== null &&
-        (yield* this.properties.ownsSelectionSteps(
+        (yield* this.properties.ownsInitialSelectionSteps(
           allocation,
           input.key,
-          input.read,
-          vertex,
         ));
       const original =
         allocation !== null &&
         (allocation.kind === "container" || allocation.kind === "cache")
           ? yield* this.properties.slotSteps(allocation, input.key)
           : undefined;
-      original?.listeners.add(vertex);
-      const selected = original?.fact;
-      if (original !== undefined && selected === undefined) return undefined;
+      const current =
+        original !== undefined && allocation !== null && this.snapshots
+          ? yield* this.properties.snapshotSteps(
+              original,
+              allocation,
+              input.key,
+              input.read,
+            )
+          : original;
+      current?.listeners.add(vertex);
+      const selected = current?.fact;
+      if (current !== undefined && selected === undefined) return undefined;
       const unknownSelectedValue = selected?.allocation === null;
       const inheritedSpecial =
         !owns && (input.key === "constructor" || input.key === "__proto__");
@@ -790,11 +803,13 @@ export class ViteCacheIdentities {
             !t.isArrayExpression(allocation.node) &&
             !t.isObjectExpression(allocation.node)));
       const modified =
+        !owns &&
         allocation !== null &&
         (yield* this.properties.prototypeChangedSteps(
           allocation,
           input.read,
           vertex,
+          input.key,
         ));
       return unknownSelectedValue ||
         inheritedSpecial ||
@@ -957,22 +972,44 @@ export class ViteCacheIdentities {
       { start: number; end: number; positions: StatementPosition[] }
     >();
     for (const [body, values] of grouped) {
-      if (body !== null)
-        values.sort(
-          (a, b) =>
-            a.position!.index - b.position!.index ||
-            a.position!.declaratorIndex - b.position!.declaratorIndex,
-        );
+      let ordered = values;
+      if (body !== null) {
+        let scratch = new Array<Entry>(values.length);
+        for (let width = 1; width < values.length; width *= 2) {
+          for (let start = 0; start < values.length; start += width * 2) {
+            const middle = Math.min(start + width, values.length);
+            const end = Math.min(start + width * 2, values.length);
+            let left = start;
+            let right = middle;
+            for (let index = start; index < end; index++) {
+              if (examined++ % 1024 === 0) yield;
+              const a = left < middle ? ordered[left] : undefined;
+              const b = right < end ? ordered[right] : undefined;
+              const precedes =
+                a !== undefined &&
+                (b === undefined ||
+                  a.position!.index < b.position!.index ||
+                  (a.position!.index === b.position!.index &&
+                    a.position!.declaratorIndex <=
+                      b.position!.declaratorIndex));
+              scratch[index] = precedes ? ordered[left++]! : ordered[right++]!;
+            }
+          }
+          [ordered, scratch] = [scratch, ordered];
+        }
+      }
       const start = entries.length;
-      for (const value of values) {
+      const positions: StatementPosition[] = [];
+      for (const value of ordered) {
         if (examined++ % 1024 === 0) yield;
         entries.push(value);
+        if (value.position !== null) positions.push(value.position);
       }
       if (body !== null)
         groups.set(body, {
           start,
           end: entries.length,
-          positions: values.map((value) => value.position!),
+          positions,
         });
     }
     let size = 1;
@@ -1319,6 +1356,9 @@ export class ViteCacheIdentities {
           allocation: null,
           owner: undefined,
           intrinsicPrototype: true,
+          ...(name === "Array" || name === "Object"
+            ? { intrinsicObject: name }
+            : {}),
           ...(name !== null &&
           isUnmodifiedGlobalReference(expression, this.state, name)
             ? { exactPrototype: true as const }
@@ -1536,6 +1576,40 @@ export class ViteCacheIdentities {
     target: Vertex,
   ): Generator<void, ViteCacheIdentity | undefined> {
     const allocation = source.allocation;
+    const intrinsic = source.intrinsicObject;
+    if (source.exactPrototype === true && intrinsic !== undefined) {
+      const path = ["global", ...intrinsic.split("."), input.key];
+      if (
+        !this.state.ambientWrites.covers(path) &&
+        !this.state.ambientEscapes.covers(path)
+      ) {
+        if (
+          (intrinsic === "Array.prototype" && input.key === "length") ||
+          ((intrinsic === "Array" || intrinsic === "Object") &&
+            (input.key === "name" || input.key === "length"))
+        )
+          return FOREIGN;
+        const selected =
+          input.key === "prototype" &&
+          (intrinsic === "Array" || intrinsic === "Object")
+            ? (`${intrinsic}.prototype` as const)
+            : input.key === "constructor" &&
+                (intrinsic === "Array.prototype" ||
+                  intrinsic === "Object.prototype")
+              ? intrinsic === "Array.prototype"
+                ? "Array"
+                : "Object"
+              : undefined;
+        if (selected !== undefined)
+          return {
+            allocation: null,
+            owner: undefined,
+            intrinsicPrototype: true,
+            intrinsicObject: selected,
+            exactPrototype: true,
+          };
+      }
+    }
     if (allocation === null)
       return {
         allocation: null,

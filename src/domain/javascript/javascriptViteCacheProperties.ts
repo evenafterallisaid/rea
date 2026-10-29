@@ -311,6 +311,7 @@ export class ViteCacheProperties {
     allocation: ViteCacheAllocation,
     read: t.Node,
     target: Vertex,
+    key?: string,
   ): Generator<void, boolean> {
     const readers = this.prototypeReaders.get(allocation) ?? new Set<Vertex>();
     this.prototypeReaders.set(allocation, readers);
@@ -322,6 +323,12 @@ export class ViteCacheProperties {
     ])
       for (const effect of effects) {
         if (examined++ % 1024 === 0) yield;
+        if (
+          key !== undefined &&
+          effect.key !== "__proto__" &&
+          !semanticPropertyPathKeyMatches(effect.key, key)
+        )
+          continue;
         if (
           !semanticReadPrecedesWrite(
             read,
@@ -346,12 +353,10 @@ export class ViteCacheProperties {
     return false;
   }
 
-  /** Prove a selected object property remains owned at this read. */
-  *ownsSelectionSteps(
+  /** own initial slots stay separate from inherited values; snapshots track later writes. */
+  *ownsInitialSelectionSteps(
     allocation: ViteCacheAllocation,
     key: string,
-    read: t.Node,
-    target: Vertex,
   ): Generator<void, boolean> {
     const node = allocation.node;
     if (t.isObjectExpression(node)) {
@@ -363,7 +368,7 @@ export class ViteCacheProperties {
       const firstSpread = yield* this.firstArraySpreadSteps(node);
       if (firstSpread >= 0 && index >= firstSpread) return false;
     } else return false;
-    return !(yield* this.prototypeChangedSteps(allocation, read, target));
+    return true;
   }
 
   private *notifyPrototypeReadersSteps(
