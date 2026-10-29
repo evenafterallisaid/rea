@@ -355,11 +355,11 @@ export class ViteCacheIdentities {
     let examined = 0;
     for (const property of node.properties) {
       if (examined++ % 1024 === 0) yield;
+      if (!t.isObjectProperty(property)) return false;
+      const key = semanticStaticPropertyKey(property.key, property.computed);
       if (
-        !t.isObjectProperty(property) ||
-        property.computed ||
-        t.isIdentifier(property.key, { name: "__proto__" }) ||
-        t.isStringLiteral(property.key, { value: "__proto__" })
+        key === null ||
+        (!property.computed && !property.shorthand && key === "__proto__")
       )
         return false;
     }

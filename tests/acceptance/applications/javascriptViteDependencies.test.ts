@@ -157,6 +157,20 @@ const mapDependenciesWithEffects = (
 const initializeCache = "const initialize = __vite__mapDeps; initialize([]); ";
 
 const allScenarios: readonly ViteScenario[] = [
+  ...["constructor", "__proto__"].map((key): ViteScenario => {
+    const call = `__vite__mapDeps([${JSON.stringify(key)}], void 0, {[${JSON.stringify(key)}]: {}})`;
+    return {
+      file: `owned-computed-${key}-value.js`,
+      source: mapDependenciesWithEffects(
+        `const values = ${call}; opaque(values); ${defaultCall};`,
+      ),
+      callSources: [call, defaultCall],
+      callOccurrences: [0, 1],
+      unknownCallOccurrences: [0],
+      resolved: ["first.js"],
+      unknown: true,
+    };
+  }),
   ...[
     "Array.name",
     "Object.name",
